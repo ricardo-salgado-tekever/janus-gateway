@@ -471,6 +471,13 @@ typedef struct janus_recordplay_seek_request {
 	janus_recordplay_frame_packet *dataseekpacket;
 } janus_recordplay_seek_request;
 
+typedef enum frame_type {
+	janus_frame_type_unknown = 0,
+	janus_frame_type_video,
+	janus_frame_type_audio,
+	janus_frame_type_data
+} frame_type;
+
 static void janus_recordplay_session_destroy(janus_recordplay_session *session) {
 	if(session && g_atomic_int_compare_and_exchange(&session->destroyed, 0, 1))
 		janus_refcount_decrease(&session->ref);
@@ -1491,6 +1498,18 @@ static janus_recordplay_seek_request *janus_recordplay_generate_seek_request(jan
 		akhz = 8;
 	int vkhz = 90;
 
+	if(video) {
+		u_int64_t video_start_ts = video->ts;
+		while(video) {
+			/* If location is not found, set at last frame */
+			if(!video->next || (((video->next->ts - video_start_ts)*1000/vkhz) >= ts))
+				break;
+			video = video->next;
+		}
+		/* Set seek timestamp to frame found */
+		ts = (video->ts - video_start_ts)*1000/vkhz;
+	}
+	
 	if(audio) {
 		u_int64_t audio_start_ts = audio->ts;
 		while(audio) { 
@@ -1499,14 +1518,7 @@ static janus_recordplay_seek_request *janus_recordplay_generate_seek_request(jan
 			audio = audio->next;
 		}
 	}
-	if(video) {
-		u_int64_t video_start_ts = video->ts;
-		while(video) {
-			if(video->next && (((video->next->ts - video_start_ts)*1000/vkhz) >= ts))
-				break;
-			video = video->next;
-		}
-	}
+
 	if(data) {
 		u_int64_t data_start_ts = data->ts;
 		while(data) {
@@ -2302,27 +2314,17 @@ void janus_recordplay_update_recordings_list(void) {
 	janus_mutex_unlock(&recordings_mutex);
 }
 
-janus_recordplay_frame_packet *janus_recordplay_get_frames(const char *dir, const char *filename) {
-	if(!dir || !filename)
-		return NULL;
-	/* Open the file */
-	char source[1024];
-	if(strstr(filename, ".mjr"))
-		g_snprintf(source, 1024, "%s/%s", dir, filename);
-	else
-		g_snprintf(source, 1024, "%s/%s.mjr", dir, filename);
-	FILE *file = fopen(source, "rb");
-	if(file == NULL) {
-		JANUS_LOG(LOG_ERR, "Could not open file %s\n", source);
-		return NULL;
-	}
+#define LIVE_FRAME_READ_LIMIT 600
+
+
+static janus_recordplay_frame_packet *janus_recordplay_get_frames_with_start_and_limit(FILE *file, janus_recordplay_frame_packet *start_from_frame, enum frame_type frame_type, int frame_limit) {
+
 	fseek(file, 0L, SEEK_END);
 	long fsize = ftell(file);
 	fseek(file, 0L, SEEK_SET);
 	JANUS_LOG(LOG_VERB, "File is %zu bytes\n", fsize);
-
+	
 	/* Pre-parse */
-	JANUS_LOG(LOG_VERB, "Pre-parsing file %s to generate ordered index...\n", source);
 	gboolean parsed_header = FALSE;
 	int bytes = 0;
 	long offset = 0;
@@ -2332,8 +2334,22 @@ janus_recordplay_frame_packet *janus_recordplay_get_frames(const char *dir, cons
 	gint64 c_time = 0, w_time = 0;
 	char prebuffer[1500];
 	memset(prebuffer, 0, 1500);
+
+	/* Check to see if this is a partial load, if so set offset there */
+	if(start_from_frame) {
+		offset = start_from_frame->offset + start_from_frame->len;
+		first_ts = start_from_frame->ts;
+		last_ts = start_from_frame->ts;
+		if(frame_type == janus_frame_type_audio)
+			audio = 1;
+		else if(frame_type == janus_frame_type_video)
+			video = 1;
+		else if(frame_type == janus_frame_type_data)
+			data = 1;
+	}
+
 	/* Let's look for timestamp resets first */
-	while(offset < fsize) {
+	while(offset < fsize && (frame_limit < 0 || count < frame_limit)) {
 		/* Read frame header */
 		fseek(file, offset, SEEK_SET);
 		bytes = fread(prebuffer, sizeof(char), 8, file);
@@ -2484,11 +2500,20 @@ janus_recordplay_frame_packet *janus_recordplay_get_frames(const char *dir, cons
 		}
 		/* Skip data for now */
 		offset += len;
+		count++;
 	}
 	/* Now let's parse the frames and order them */
 	offset = 0;
+	count = 0;
 	janus_recordplay_frame_packet *list = NULL, *last = NULL;
-	while(offset < fsize) {
+
+	/* Check to see if this is a partial load, if so set offset there */
+	if(start_from_frame) {
+		offset = start_from_frame->offset + start_from_frame->len;
+		list = start_from_frame;
+		last = start_from_frame;
+	}
+	while(offset < fsize && (frame_limit < 0 || count < frame_limit)) {
 		/* Read frame header */
 		fseek(file, offset, SEEK_SET);
 		bytes = fread(prebuffer, sizeof(char), 8, file);
@@ -2624,8 +2649,10 @@ janus_recordplay_frame_packet *janus_recordplay_get_frames(const char *dir, cons
 				}
 				/* If either the timestamp ot the sequence number we just got is smaller, keep going back */
 				tmp = tmp->prev;
+
+				if(tmp == start_from_frame) break;
 			}
-			if(!added) {
+			if(!added && !start_from_frame) {
 				/* We reached the start */
 				p->next = list;
 				list->prev = p;
@@ -2646,6 +2673,28 @@ janus_recordplay_frame_packet *janus_recordplay_get_frames(const char *dir, cons
 		tmp = tmp->next;
 	}
 	JANUS_LOG(LOG_VERB, "Counted %"SCNu16" frame packets\n", count);
+
+	return list;
+}
+
+janus_recordplay_frame_packet *janus_recordplay_get_frames(const char *dir, const char *filename) {
+	if(!dir || !filename)
+		return NULL;
+	/* Open the file */
+	char source[1024];
+	if(strstr(filename, ".mjr"))
+		g_snprintf(source, 1024, "%s/%s", dir, filename);
+	else
+		g_snprintf(source, 1024, "%s/%s.mjr", dir, filename);
+	FILE *file = fopen(source, "rb");
+	if(file == NULL) {
+		JANUS_LOG(LOG_ERR, "Could not open file %s\n", source);
+		return NULL;
+	}
+
+	JANUS_LOG(LOG_VERB, "Pre-parsing file %s to generate ordered index...\n", source);
+
+	janus_recordplay_frame_packet *list = janus_recordplay_get_frames_with_start_and_limit(file, NULL, janus_frame_type_unknown , LIVE_FRAME_READ_LIMIT);
 
 	/* Done! */
 	fclose(file);
@@ -2843,6 +2892,10 @@ static void *janus_recordplay_playout_thread(void *sessiondata) {
 			}
 		}
 		if(audio) {
+			/* Check to see if this the last frame and check for more */
+			if(!audio->next) {
+				janus_recordplay_get_frames_with_start_and_limit(afile, audio, janus_frame_type_audio, LIVE_FRAME_READ_LIMIT);
+			}
 			if(audio == session->aframes) {
 				/* First packet, send now */
 				fseek(afile, audio->offset, SEEK_SET);
@@ -2905,6 +2958,10 @@ static void *janus_recordplay_playout_thread(void *sessiondata) {
 			}
 		}
 		if(video) {
+			/* Check to see if this the last frame and check for more */
+			if(!video->next) {
+				janus_recordplay_get_frames_with_start_and_limit(vfile, video, janus_frame_type_video, LIVE_FRAME_READ_LIMIT);
+			}
 			if(video == session->vframes) {
 				/* First packets: there may be many of them with the same timestamp, send them all */
 				uint64_t ts = video->ts;
@@ -2967,6 +3024,9 @@ static void *janus_recordplay_playout_thread(void *sessiondata) {
 						janus_plugin_rtp prtp = { .video = TRUE, .buffer = (char *)buffer, .length = bytes };
 						janus_plugin_rtp_extensions_reset(&prtp.extensions);
 						gateway->relay_rtp(session->handle, &prtp);
+						if(!video->next) {
+							janus_recordplay_get_frames_with_start_and_limit(vfile, video, janus_frame_type_video, LIVE_FRAME_READ_LIMIT);
+						}						
 						video = video->next;
 					}
 					vsent = TRUE;
@@ -2974,6 +3034,10 @@ static void *janus_recordplay_playout_thread(void *sessiondata) {
 			}
 		}
 		if(data) {
+			/* Check to see if this the last frame and check for more */
+			if(!data->next) {
+				janus_recordplay_get_frames_with_start_and_limit(dfile, data, janus_frame_type_data, LIVE_FRAME_READ_LIMIT);
+			}
 			u_int64_t prev_ts = 0; /* All timestamps for data are indexed to 0, since when parsing ts = when - c_time */
 			if(data->prev)
 				prev_ts = data->prev->ts;
