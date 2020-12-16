@@ -2694,7 +2694,7 @@ janus_recordplay_frame_packet *janus_recordplay_get_frames(const char *dir, cons
 
 	JANUS_LOG(LOG_VERB, "Pre-parsing file %s to generate ordered index...\n", source);
 
-	janus_recordplay_frame_packet *list = janus_recordplay_get_frames_with_start_and_limit(file, NULL, janus_frame_type_unknown , LIVE_FRAME_READ_LIMIT);
+	janus_recordplay_frame_packet *list = janus_recordplay_get_frames_with_start_and_limit(file, NULL, janus_frame_type_unknown , -1);
 
 	/* Done! */
 	fclose(file);
