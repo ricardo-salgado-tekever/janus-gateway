@@ -2895,7 +2895,7 @@ static void *janus_recordplay_playout_thread(void *sessiondata) {
 		if(audio) {
 			/* Check to see if this the last frame and check for more */
 			if(!audio->next) {
-				janus_recordplay_get_frames_with_start_and_limit(afile, audio, janus_frame_type_audio, LIVE_FRAME_READ_LIMIT);
+				janus_recordplay_get_frames_with_start_and_limit(afile, audio, janus_frame_type_audio, -1);
 			}
 			if(audio == session->aframes) {
 				/* First packet, send now */
@@ -2961,7 +2961,7 @@ static void *janus_recordplay_playout_thread(void *sessiondata) {
 		if(video) {
 			/* Check to see if this the last frame and check for more */
 			if(!video->next) {
-				janus_recordplay_get_frames_with_start_and_limit(vfile, video, janus_frame_type_video, LIVE_FRAME_READ_LIMIT);
+				janus_recordplay_get_frames_with_start_and_limit(vfile, video, janus_frame_type_video, -1);
 			}
 			if(video == session->vframes) {
 				/* First packets: there may be many of them with the same timestamp, send them all */
@@ -3026,7 +3026,7 @@ static void *janus_recordplay_playout_thread(void *sessiondata) {
 						janus_plugin_rtp_extensions_reset(&prtp.extensions);
 						gateway->relay_rtp(session->handle, &prtp);
 						if(!video->next) {
-							janus_recordplay_get_frames_with_start_and_limit(vfile, video, janus_frame_type_video, LIVE_FRAME_READ_LIMIT);
+							janus_recordplay_get_frames_with_start_and_limit(vfile, video, janus_frame_type_video, -1);
 						}						
 						video = video->next;
 					}
