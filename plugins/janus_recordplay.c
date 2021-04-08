@@ -472,6 +472,7 @@ typedef struct janus_recordplay_seek_request {
 	janus_recordplay_frame_packet *audioseekframe;
 	janus_recordplay_frame_packet *videoseekframe;
 	janus_recordplay_frame_packet *dataseekpacket;
+	gboolean findnextkeyframe;
 } janus_recordplay_seek_request;
 
 typedef enum frame_type {
@@ -1564,6 +1565,7 @@ static janus_recordplay_seek_request *janus_recordplay_generate_seek_request(jan
 	seek_request->audioseekframe = audio;
 	seek_request->videoseekframe = video;
 	seek_request->dataseekpacket = data;
+	seek_request->findnextkeyframe = FALSE;
 
 	return seek_request;
 }
@@ -2041,7 +2043,10 @@ recdone:
 
 				/* Search seek location and send seek request to  */
 				janus_recordplay_seek_request *seek_request = janus_recordplay_generate_seek_request(session, ts);
-				if (!session->seek_requests)
+				json_t *findnextkeyframe = json_object_get(root, "align_next_keyframe");
+				if(findnextkeyframe && json_boolean_value(findnextkeyframe))
+					seek_request->findnextkeyframe = TRUE;
+				if(!session->seek_requests)
 					session->seek_requests = g_async_queue_new();
 				if(seek_request) 
 					g_async_queue_push(session->seek_requests, seek_request);
@@ -2084,6 +2089,9 @@ playdone:
 
 			/* Search seek location and send seek request to  */
 			janus_recordplay_seek_request *seek_request = janus_recordplay_generate_seek_request(session, ts);
+			json_t *findnextkeyframe = json_object_get(root, "align_next_keyframe");
+			if(findnextkeyframe && json_boolean_value(findnextkeyframe))
+				seek_request->findnextkeyframe = TRUE;
 			if (!session->seek_requests)
 				session->seek_requests = g_async_queue_new();
 			if(seek_request) 
@@ -2779,7 +2787,7 @@ static janus_recordplay_frame_packet *janus_recordplay_find_next_keyframe(janus_
 	char *buffer = g_malloc0(1500);
 	while(video) {
 		fseek(vfile, video->offset, SEEK_SET);
-		int bytes = fread(buffer, sizeof(char), video->len, vfile);
+		int bytes = fread(buffer, sizeof(char), video->len < 1500 ? video->len : 1500, vfile);
 		if(bytes != video->len)
 			JANUS_LOG(LOG_WARN, "Didn't manage to read all the bytes we needed (%d < %d)...\n", bytes, video->len);
 		janus_plugin_rtp packet = { .video = TRUE, .buffer = (char *)buffer, .length = bytes };
@@ -2922,7 +2930,8 @@ static void *janus_recordplay_playout_thread(void *sessiondata) {
 			if(seek_request) {
 				u_int64_t key_frame_offset = 0;
 				if(seek_request->videoseekframe) {
-					seek_request->videoseekframe = janus_recordplay_find_next_keyframe(rec->vcodec, vfile, seek_request->videoseekframe, &key_frame_offset);
+					if(seek_request->findnextkeyframe)
+						seek_request->videoseekframe = janus_recordplay_find_next_keyframe(rec->vcodec, vfile, seek_request->videoseekframe, &key_frame_offset);
 					session->context.v_seq_reset = TRUE;
 					session->context.v_base_ts_prev += (video->ts - session->context.v_base_ts);
 					session->context.v_base_ts = seek_request->videoseekframe->ts;
