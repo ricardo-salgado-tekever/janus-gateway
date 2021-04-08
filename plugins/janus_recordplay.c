@@ -2412,6 +2412,8 @@ static janus_recordplay_frame_packet *janus_recordplay_get_frames_with_start_and
 		else if(frame_type == janus_frame_type_data)
 			data = 1;
 	}
+	if(offset >= fsize)
+		return start_from_frame;
 
 	/* Let's look for timestamp resets first */
 	while(offset < fsize && (frame_limit < 0 || count < frame_limit)) {
