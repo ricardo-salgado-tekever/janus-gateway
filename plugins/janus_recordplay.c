@@ -2964,7 +2964,9 @@ static void *janus_recordplay_playout_thread(void *sessiondata) {
 		if(audio) {
 			/* Check to see if this the last frame and check for more */
 			if(!audio->next) {
+				janus_mutex_lock(&rec->mutex);
 				janus_recordplay_get_frames_with_start_and_limit(afile, audio, janus_frame_type_audio, -1);
+				janus_mutex_unlock(&rec->mutex);
 			}
 			if(audio == session->aframes) {
 				/* First packet, send now */
@@ -3030,7 +3032,9 @@ static void *janus_recordplay_playout_thread(void *sessiondata) {
 		if(video) {
 			/* Check to see if this the last frame and check for more */
 			if(!video->next) {
+				janus_mutex_lock(&rec->mutex);
 				janus_recordplay_get_frames_with_start_and_limit(vfile, video, janus_frame_type_video, -1);
+				janus_mutex_unlock(&rec->mutex);
 			}
 			if(video == session->vframes) {
 				/* First packets: there may be many of them with the same timestamp, send them all */
@@ -3106,7 +3110,9 @@ static void *janus_recordplay_playout_thread(void *sessiondata) {
 		if(data) {
 			/* Check to see if this the last frame and check for more */
 			if(!data->next) {
+				janus_mutex_lock(&rec->mutex);
 				janus_recordplay_get_frames_with_start_and_limit(dfile, data, janus_frame_type_data, LIVE_FRAME_READ_LIMIT);
+				janus_mutex_unlock(&rec->mutex);
 			}
 			u_int64_t prev_ts = 0; /* All timestamps for data are indexed to 0, since when parsing ts = when - c_time */
 			if(data->prev)
