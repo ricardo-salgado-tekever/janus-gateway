@@ -2410,6 +2410,8 @@ static janus_recordplay_frame_packet *janus_recordplay_get_frames_with_start_and
 			video = 1;
 		else if(frame_type == janus_frame_type_data)
 			data = 1;
+		JANUS_LOG(LOG_INFO, "Requested additional data for recording with size %d at location %d. type %s\n", fsize, offset, 
+			audio == 1? "a" : (video == 1? "v" : (data == 1 ? "d" : "u")));
 	}
 	if(offset >= fsize)
 		return start_from_frame;
