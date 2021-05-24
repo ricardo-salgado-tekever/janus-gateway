@@ -2005,21 +2005,27 @@ recdone:
 			}
 			/* Access the frames */
 			if(rec->arc_file) {
+				janus_mutex_lock(&rec->mutex);
 				session->aframes = janus_recordplay_get_frames(recordings_path, rec->arc_file);
+				janus_mutex_unlock(&rec->mutex);
 				if(session->aframes == NULL) {
 					JANUS_LOG(LOG_WARN, "Error opening audio recording, trying to go on anyway\n");
 					warning = "Broken audio file, playing video only";
 				}
 			} else session->aframes = NULL;
 			if(rec->vrc_file) {
+				janus_mutex_lock(&rec->mutex);
 				session->vframes = janus_recordplay_get_frames(recordings_path, rec->vrc_file);
+				janus_mutex_unlock(&rec->mutex);
 				if(session->vframes == NULL) {
 					JANUS_LOG(LOG_WARN, "Error opening video recording, trying to go on anyway\n");
 					warning = "Broken video file, playing audio only";
 				}
 			} else session->vframes = NULL;
 			if(rec->drc_file) {
+				janus_mutex_lock(&rec->mutex);
 				session->dframes = janus_recordplay_get_frames(recordings_path, rec->drc_file);
+				janus_mutex_unlock(&rec->mutex);
 				if(session->dframes == NULL) {
 					JANUS_LOG(LOG_WARN, "Error opening data recording, trying to go on anyway\n");
 					warning = "Broken data file, playing audio/video only";
@@ -2410,8 +2416,6 @@ static janus_recordplay_frame_packet *janus_recordplay_get_frames_with_start_and
 			video = 1;
 		else if(frame_type == janus_frame_type_data)
 			data = 1;
-		JANUS_LOG(LOG_INFO, "Requested additional data for recording with size %d at location %d. type %s\n", fsize, offset, 
-			audio == 1? "a" : (video == 1? "v" : (data == 1 ? "d" : "u")));
 	}
 	if(offset >= fsize)
 		return start_from_frame;
@@ -3105,7 +3109,7 @@ static void *janus_recordplay_playout_thread(void *sessiondata) {
 						janus_plugin_rtp_extensions_reset(&prtp.extensions);
 						gateway->relay_rtp(session->handle, &prtp);
 						if(!video->next) {
-							janus_recordplay_get_frames_with_start_and_limit(vfile, video, janus_frame_type_video, -1);
+							continue;
 						}						
 						video = video->next;
 					}
