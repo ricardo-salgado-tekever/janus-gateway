@@ -2965,7 +2965,10 @@ static void *janus_recordplay_playout_thread(void *sessiondata) {
 			/* Check to see if this the last frame and check for more */
 			if(!audio->next) {
 				janus_mutex_lock(&rec->mutex);
-				janus_recordplay_get_frames_with_start_and_limit(afile, audio, janus_frame_type_audio, -1);
+				if(!janus_recordplay_get_frames_with_start_and_limit(afile, audio, janus_frame_type_audio, -1)) {
+					afile = NULL;
+					break;
+				}
 				janus_mutex_unlock(&rec->mutex);
 			}
 			if(audio == session->aframes) {
@@ -3033,7 +3036,10 @@ static void *janus_recordplay_playout_thread(void *sessiondata) {
 			/* Check to see if this the last frame and check for more */
 			if(!video->next) {
 				janus_mutex_lock(&rec->mutex);
-				janus_recordplay_get_frames_with_start_and_limit(vfile, video, janus_frame_type_video, -1);
+				if(!janus_recordplay_get_frames_with_start_and_limit(vfile, video, janus_frame_type_video, -1)) {
+					vfile = NULL;
+					break;
+				}
 				janus_mutex_unlock(&rec->mutex);
 			}
 			if(video == session->vframes) {
@@ -3111,7 +3117,10 @@ static void *janus_recordplay_playout_thread(void *sessiondata) {
 			/* Check to see if this the last frame and check for more */
 			if(!data->next) {
 				janus_mutex_lock(&rec->mutex);
-				janus_recordplay_get_frames_with_start_and_limit(dfile, data, janus_frame_type_data, LIVE_FRAME_READ_LIMIT);
+				if(!janus_recordplay_get_frames_with_start_and_limit(dfile, data, janus_frame_type_data, -1)) {
+					dfile = NULL;
+					break;
+				}
 				janus_mutex_unlock(&rec->mutex);
 			}
 			u_int64_t prev_ts = 0; /* All timestamps for data are indexed to 0, since when parsing ts = when - c_time */
