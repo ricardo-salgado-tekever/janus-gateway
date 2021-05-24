@@ -2716,7 +2716,8 @@ static janus_recordplay_frame_packet *janus_recordplay_get_frames_with_start_and
 				/* If either the timestamp ot the sequence number we just got is smaller, keep going back */
 				tmp = tmp->prev;
 
-				if(tmp == start_from_frame) break;
+				/* If we are loading another chunk of file, no use going back */
+				if(last == start_from_frame) break;
 			}
 			if(!added && !start_from_frame) {
 				/* We reached the start */
